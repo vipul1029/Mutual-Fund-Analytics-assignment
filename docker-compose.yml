@@ -1,0 +1,77 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: mf-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: mf_analytics
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7
+    container_name: mf-redis
+    ports:
+      - "6379:6379"
+
+  api:
+    build: .
+    container_name: mf-api
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      LOG_LEVEL: info
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/mf_analytics?schema=public
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      MFAPI_BASE_URL: https://api.mfapi.in
+      CACHE_TTL_SECONDS: 120
+      SYNC_QUEUE_NAME: mf-sync-queue
+      DEAD_LETTER_QUEUE_NAME: mf-sync-dlq
+      SYNC_BATCH_SIZE: 5
+      SYNC_BATCH_DELAY_MS: 10000
+      SYNC_REQUEST_SPACING_MS: 12000
+    command: sh -c "npx prisma migrate deploy && node src/server.js"
+
+  worker:
+    build: .
+    container_name: mf-worker
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    environment:
+      NODE_ENV: production
+      LOG_LEVEL: info
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/mf_analytics?schema=public
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      MFAPI_BASE_URL: https://api.mfapi.in
+      CACHE_TTL_SECONDS: 120
+      SYNC_QUEUE_NAME: mf-sync-queue
+      DEAD_LETTER_QUEUE_NAME: mf-sync-dlq
+      SYNC_BATCH_SIZE: 5
+      SYNC_BATCH_DELAY_MS: 10000
+      SYNC_REQUEST_SPACING_MS: 12000
+    command: sh -c "npx prisma migrate deploy && node src/worker.js"
+
+volumes:
+  postgres_data:

@@ -1,0 +1,67 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Fund {
+  code      String      @id
+  name      String
+  amc       String
+  category  String
+  navData   NavData[]
+  analytics Analytics[]
+  syncState SyncState?
+
+  @@index([amc])
+  @@index([category])
+  @@map("funds")
+}
+
+model NavData {
+  id       BigInt   @id @default(autoincrement())
+  fundCode String   @map("fund_code")
+  date     DateTime @db.Date
+  nav      Decimal  @db.Decimal(12, 4)
+  fund     Fund     @relation(fields: [fundCode], references: [code], onDelete: Cascade)
+
+  @@unique([fundCode, date])
+  @@index([fundCode, date(sort: Desc)])
+  @@map("nav_data")
+}
+
+model Analytics {
+  fundCode     String   @map("fund_code")
+  window       String
+  minReturn    Decimal  @map("min_return") @db.Decimal(10, 6)
+  maxReturn    Decimal  @map("max_return") @db.Decimal(10, 6)
+  medianReturn Decimal  @map("median_return") @db.Decimal(10, 6)
+  p25          Decimal  @db.Decimal(10, 6)
+  p75          Decimal  @db.Decimal(10, 6)
+  maxDrawdown  Decimal  @map("max_drawdown") @db.Decimal(10, 6)
+  cagrMin      Decimal  @map("cagr_min") @db.Decimal(10, 6)
+  cagrMax      Decimal  @map("cagr_max") @db.Decimal(10, 6)
+  cagrMedian   Decimal  @map("cagr_median") @db.Decimal(10, 6)
+  computedAt   DateTime @map("computed_at") @default(now())
+  fund         Fund     @relation(fields: [fundCode], references: [code], onDelete: Cascade)
+
+  @@id([fundCode, window])
+  @@index([window, medianReturn(sort: Desc)])
+  @@map("analytics")
+}
+
+model SyncState {
+  fundCode       String   @id @map("fund_code")
+  lastSyncedDate DateTime @map("last_synced_date") @db.Date
+  status         String   @default("pending")
+  lastRunAt      DateTime? @map("last_run_at")
+  lastError      String?  @map("last_error")
+  updatedAt      DateTime @map("updated_at") @updatedAt
+  fund           Fund     @relation(fields: [fundCode], references: [code], onDelete: Cascade)
+
+  @@index([status])
+  @@map("sync_state")
+}
