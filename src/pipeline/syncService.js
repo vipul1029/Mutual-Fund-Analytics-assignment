@@ -44,7 +44,7 @@ export async function enqueueFundJobs() {
       JOBS.SYNC_FUND,
       { code: fund.code },
       {
-        jobId: `sync:${fund.code}`,
+        jobId: `sync-${fund.code}`,
         delay: scheduledDelay,
         removeOnComplete: 100,
         removeOnFail: 100,
