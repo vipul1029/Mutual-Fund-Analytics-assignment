@@ -1,23 +1,42 @@
 # Mutual Fund Analytics Backend
 
-Production-grade Node.js backend for fetching and analyzing Indian mutual fund NAV history from [mfapi.in](https://api.mfapi.in), with strict multi-window rate limiting, resumable sync pipeline, precomputed analytics, and low-latency APIs.
+## Overview
 
-## Stack
+This project is built as part of a backend assignment to fetch and analyze mutual fund NAV data using the public API from mfapi.in.
 
-- Node.js 20+ (LTS)
-- Fastify
-- PostgreSQL + Prisma
-- Redis + BullMQ
-- Bottleneck (rate limiting)
-- Day.js (date handling)
-- Vitest (tests)
+Instead of creating simple APIs, the goal here was to design a system that behaves more like a real backend service — where data is fetched in the background, processed safely with rate limits, and served efficiently through APIs.
 
-## Folder Structure
+---
+
+## Tech Stack
+
+* Node.js (v20+)
+* Fastify
+* PostgreSQL with Prisma
+* Redis with BullMQ
+* Bottleneck (rate limiting)
+* Day.js (date handling)
+* Vitest (testing)
+
+This stack was chosen to keep the system simple, scalable, and easy to reason about.
+
+---
+
+## How the System Works
+
+* A background worker fetches NAV data from the external API
+* Requests are rate-limited (per second, minute, and hour)
+* Data is stored in PostgreSQL
+* Analytics are precomputed and stored
+* APIs return fast responses without heavy computation at request time
+
+---
+
+## Project Structure
 
 ```text
 src/
   api/
-    routes/
   services/
   pipeline/
   analytics/
@@ -28,40 +47,57 @@ prisma/
 tests/
 ```
 
-## Quick Start (Local)
+---
 
-1. Install dependencies:
+## Running the Project (Local)
+
+1. Install dependencies
+
    ```bash
    npm install
    ```
-2. Copy env template:
+
+2. Setup environment
+
    ```bash
    cp .env.example .env
    ```
-3. Start PostgreSQL + Redis (Docker recommended):
+
+3. Start PostgreSQL and Redis
+
    ```bash
    docker compose up -d postgres redis
    ```
-4. Generate Prisma client and apply migrations:
+
+4. Setup database
+
    ```bash
    npm run prisma:generate
    npm run prisma:migrate -- --name init
    ```
-5. Seed the exact 10 funds (real discovery through `mfapi.in`):
+
+5. Seed initial funds
+
    ```bash
    npm run prisma:seed
    ```
-6. Start API and worker:
+
+6. Start the server and worker
+
    ```bash
    npm run start
    npm run worker
    ```
-7. Trigger initial backfill:
+
+7. Trigger data sync
+
    ```bash
    curl -X POST http://localhost:3000/sync/trigger
    ```
 
-## Docker Full Run
+---
+
+## Running with Docker
 
 ```bash
 docker compose up --build
@@ -73,76 +109,86 @@ Then seed once:
 docker compose exec api node prisma/seed.js
 ```
 
-## Endpoints
+---
 
-- `GET /funds?category=&amc=`
-- `GET /funds/:code`
-- `GET /funds/:code/analytics?window=3Y`
-- `GET /funds/:code/analytics/coverage` (edge-case helper for insufficient history)
-- `GET /funds/rank?category=<required>&sort_by=median_return|max_drawdown&window=<required>&limit=5`
-- `GET /metrics`
-- `POST /sync/trigger`
-- `GET /sync/status`
+## API Endpoints
 
-## Performance Notes
+Base URL: `http://localhost:3000`
 
-- Analytics are precomputed and persisted in `analytics` table.
-- Redis caching is enabled for funds list/detail/ranking/analytics.
-- DB indexes exist on filter/sort paths.
-- APIs are read-optimized and do not perform heavy analytics computations on request path.
+Below are the main APIs exposed by the system:
 
-## Rate-Limit Guarantees
+| Method | Endpoint                          | Description                                    |
+| ------ | --------------------------------- | ---------------------------------------------- |
+| GET    | `/funds`                          | List funds (optional filters: category, amc)   |
+| GET    | `/funds/:code`                    | Get fund details                               |
+| GET    | `/funds/:code/analytics`          | Get analytics (requires `window=1Y/3Y/5Y/10Y`) |
+| GET    | `/funds/:code/analytics/coverage` | Check available data windows                   |
+| GET    | `/funds/rank`                     | Rank funds (requires category + window)        |
+| POST   | `/sync/trigger`                   | Trigger background sync                        |
+| GET    | `/sync/status`                    | Check sync status                              |
+| GET    | `/metrics`                        | View rate limiter metrics                      |
 
-All outbound MFAPI requests pass through a chained Bottleneck strategy:
+Example:
 
-- 2 req/sec
-- 50 req/min
-- 300 req/hour
+```bash
+curl http://localhost:3000/funds
+```
 
-All three limits are enforced simultaneously.
+---
+
+## Rate Limiting
+
+All external API calls follow these limits:
+
+* 2 requests per second
+* 50 requests per minute
+* 300 requests per hour
+
+These limits are enforced together to ensure stable and safe API usage.
+You can verify this using the `/metrics` endpoint and worker logs.
+
+---
 
 ## Testing
+
+Run all tests:
 
 ```bash
 npm test
 ```
 
-Includes:
-- Rate limiter correctness
-- Analytics correctness
-- Pipeline resumability logic
+Tests cover:
 
-## Final Validation Checklist (Proof-Oriented)
+* Rate limiting logic
+* Analytics calculations
+* Pipeline behavior
+* API responses
 
-1. Start services and run sync:
-   ```bash
-   docker compose up -d postgres redis
-   npm run prisma:generate
-   npm run prisma:migrate -- --name init
-   npm run prisma:seed
-   npm run start
-   npm run worker
-   curl -X POST http://localhost:3000/sync/trigger
-   ```
-2. Verify sync status and fund-level states:
-   ```bash
-   curl http://localhost:3000/sync/status
-   ```
-3. Verify live rate metrics:
-   ```bash
-   curl http://localhost:3000/metrics
-   ```
-4. Run automated rate-limit proof:
-   ```bash
-   npm run proof:rate-limit
-   ```
-5. Run API benchmark proof:
-   ```bash
-   npm run benchmark:api
-   ```
-6. Validate insufficient-history handling:
-   ```bash
-   curl "http://localhost:3000/funds/<code>/analytics/coverage"
-   ```
+---
 
-See `docs/VALIDATION_EVIDENCE.md` for sample proof logs/output and acceptance criteria.
+## Postman Collection
+
+A Postman collection is included to make API testing easier.
+
+Import from:
+
+```
+postman/Mutual-Fund-Analytics.postman_collection.json
+```
+
+---
+
+## What to Verify
+
+After running the project:
+
+* Trigger sync → data should start loading
+* `/funds` → should return list of funds
+* `/analytics` → should return computed metrics
+* `/metrics` → should show rate limiter usage
+* All tests should pass
+
+These steps help confirm that the system is working end-to-end.
+
+---
+

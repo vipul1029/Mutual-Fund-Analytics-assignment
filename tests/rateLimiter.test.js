@@ -24,9 +24,9 @@ describe("rate limiter", () => {
     await limiter.stop();
 
     const sorted = [...executionTimes].sort((a, b) => a - b);
-    expect(sorted[1]).toBeLessThan(220); // first 2 pass second limiter (allow CI timer jitter)
-    expect(sorted[3]).toBeGreaterThanOrEqual(100); // next 2 wait for second refill
-    expect(sorted[6]).toBeGreaterThanOrEqual(600); // 7th waits for hour limiter
+    expect(sorted[1]).toBeLessThan(220); 
+    expect(sorted[3]).toBeGreaterThanOrEqual(100); 
+    expect(sorted[6]).toBeGreaterThanOrEqual(600); 
   });
 
   it("exposes metrics payload shape with limits", async () => {

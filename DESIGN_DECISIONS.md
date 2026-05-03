@@ -1,117 +1,154 @@
 # Design Decisions
 
-## Architecture Overview
+## Overview
 
-- Fastify serves public APIs and keeps request handlers thin.
-- Prisma handles relational persistence in PostgreSQL (`funds`, `nav_data`, `analytics`, `sync_state`).
-- BullMQ orchestrates background sync with worker processes.
-- Redis is used for:
-  - queue backend
-  - cache layer for hot read endpoints
-  - distributed limiter counters/state
-- Analytics are precomputed during sync and stored in DB for low-latency reads.
+This project is designed to simulate how a real backend system would work when dealing with external APIs, large data ingestion, and analytics computation.
 
-## Rate Limiting Strategy
+The focus was on building something reliable and easy to reason about, while still handling real-world concerns like rate limiting, background processing, and failure recovery.
 
-- Implemented with Bottleneck using **three chained limiters** (hour -> minute -> second).
-- Added a Redis-backed **atomic quota guard** before scheduling each call.
-- Guard logic checks all windows in one Lua script and only increments counters if all limits have capacity.
-- This guarantees no partial increments and no race-condition based violations across concurrent workers.
-- Uses Redis-backed Bottleneck datastore so scheduling state survives process restarts and coordinates across multiple workers.
-- This approach gives strict global compliance for:
-  - 2 req/sec
-  - 50 req/min
-  - 300 req/hour
-- Metrics are exposed through `/metrics` using current fixed-window Redis keys.
-- Every MFAPI call logs:
-  - timestamp
-  - scheme code
-  - per-second, per-minute, per-hour usage snapshot
+---
 
-## Rate Limiter Correctness Proof (Practical)
+## Architecture
 
-- **Safety**: A request is admitted only if `sec < 2 AND min < 50 AND hour < 300`.
-- **Atomicity**: The Redis Lua script performs check+increment in one transaction-like operation.
-- **Concurrency**: With shared Redis keys, all processes observe and update the same counters.
-- **Persistence**: Counter keys are Redis-backed and survive API/worker restarts (until TTL expiry), so restart cannot reset quota unexpectedly.
-- **Liveness**: On rejection, caller sleeps until the next exceeded window boundary and retries.
-- **Edge cases handled**:
-  - Process restart: Redis counters and limiter state continue; restart does not reset quota.
-  - Multi-worker race: Lua atomic check+increment prevents over-admission.
-  - Burst retries: retries are still routed through the same guard and limiter chain.
-  - Partial window overlap (e.g., minute near rollover): wait uses exact remaining window time.
+* Fastify is used to serve APIs and keep request handling simple.
+* PostgreSQL (via Prisma) is used to store:
 
-## Backfill + Incremental Sync Design
+  * funds
+  * NAV data
+  * analytics
+  * sync state
+* BullMQ handles background jobs for syncing data.
+* Redis is used for:
 
-- BullMQ queue has two job types:
-  - `full-sync`: enqueues all tracked funds.
-  - `sync-fund`: fetches history for one fund, upserts NAV rows, recomputes analytics.
-- Queue/worker flow:
-  - API trigger enqueues `full-sync`
-  - worker expands into per-fund `sync-fund` jobs
-  - each fund job is idempotent and updates sync watermark/status
-- Backfill enqueue is **chunked and time-spaced**:
-  - configurable batch size
-  - delay between batches
-  - per-fund request spacing
-- Spacing defaults to 12 seconds per fund job which caps throughput at <=300/hour and prevents burst pressure.
-- Sync reads `sync_state.last_synced_date` and only inserts rows beyond that date.
-- NAV ingestion is idempotent using `createMany(..., skipDuplicates: true)` and unique `(fund_code, date)` constraint.
-- Daily incremental sync can be done by scheduling `POST /sync/trigger` via cron/K8s CronJob.
+  * queue backend
+  * caching frequently used API responses
+  * storing rate limit counters
+* Analytics are precomputed during sync and stored in the database so APIs can respond quickly.
 
-## Crash Recovery / Resumability
+---
 
-- `sync_state` persists per-fund watermark (`last_synced_date`).
-- `sync_state` also stores fund-level `status`, `last_run_at`, and `last_error` for observability.
-- If worker crashes mid-pipeline, rerun continues from the last committed watermark.
-- BullMQ retry with exponential backoff handles transient failures.
-- Permanent failures are moved to a dead-letter queue for manual replay.
-- API-level retries with jittered exponential backoff handle `mfapi.in` failures and rate-limit responses.
+## Rate Limiting
+
+External API calls are strictly controlled using a combination of Bottleneck and Redis.
+
+* Limits applied:
+
+  * 2 requests per second
+  * 50 requests per minute
+  * 300 requests per hour
+
+* A Redis-based check ensures:
+
+  * All limits are verified before a request is made
+  * Counters are updated atomically (no race conditions)
+  * Multiple workers share the same global limits
+
+Each API call logs:
+
+* timestamp
+* fund code
+* usage in second, minute, and hour windows
+
+This helps in verifying that limits are always respected.
+
+---
+
+## Sync Pipeline Design
+
+The system uses a queue-based approach:
+
+* `full-sync` → triggers syncing for all funds
+* `sync-fund` → processes one fund at a time
+
+Flow:
+
+1. API triggers `full-sync`
+2. Worker creates jobs for each fund
+3. Each job:
+
+   * fetches NAV data
+   * inserts new records
+   * recomputes analytics
+
+To avoid overloading the API:
+
+* Jobs are spaced out with delays
+* Batch size and timing are configurable
+* Default spacing ensures limits are never exceeded
+
+---
+
+## Data Sync Strategy
+
+* Each fund has a `sync_state`
+* Only new data (after last synced date) is fetched
+* Duplicate entries are avoided using database constraints
+
+This makes the process:
+
+* efficient
+* idempotent (safe to retry)
+
+---
 
 ## Failure Handling
 
-- Network/transient provider errors: retried with exponential backoff + jitter.
-- Job failures: BullMQ retry policy with exponential backoff.
-- Terminal failures: moved to dead-letter queue (`mf-sync-dlq`) for investigation/replay.
-- Process restarts: persisted queue state + sync watermark allow safe resume.
+The system is designed to handle failures gracefully:
 
-## Analytics Tradeoffs
+* API errors → retried with backoff
+* Job failures → retried automatically
+* Permanent failures → moved to a dead-letter queue
+* Crashes → sync resumes from last saved state
 
-- Analytics are precomputed and stored in DB to keep read APIs fast (<200ms target).
-- Rolling CAGR uses nearest available NAV on/after target date, accommodating weekends/holidays.
-- Max drawdown computed across full historical series for each fund.
-- Funds with insufficient history do not generate invalid windows; only valid windows are stored.
-- Chosen tradeoff: more compute during ingestion, much faster read path.
+---
 
-## Analytics Method Details
+## Analytics Design
 
-- **CAGR formula**:
-  - `CAGR = (NAV_end / NAV_start)^(365 / actual_days) - 1`
-- **Rolling returns**:
-  - For each start date, find the first available NAV on/after `start + windowDays`.
-  - Compute CAGR for all valid pairs.
-  - Aggregate min/max/median/p25/p75.
-- **Max drawdown**:
-  - Track running peak NAV.
-  - Drawdown at each point: `(NAV_t - peak) / peak`.
-  - Result is the most negative drawdown over the series.
+Analytics are computed during sync instead of at request time.
 
-## Scaling Strategy
+This improves API performance significantly.
 
-- Horizontal worker scaling:
-  - Add worker replicas; Bottleneck Redis datastore keeps global rate compliance.
-- DB scaling:
-  - Read replicas for heavy read traffic.
-  - Partition `nav_data` by fund or date if row count grows significantly.
-- Cache scaling:
-  - Redis cluster/sentinel.
-- Queue scaling:
-  - BullMQ supports multiple consumers with at-least-once semantics.
+For each fund and window (1Y, 3Y, 5Y, 10Y), we compute:
+
+* rolling returns
+* median return
+* p25 / p75
+* CAGR (min, max, median)
+* max drawdown
+
+---
+
+## Analytics Logic
+
+* CAGR is calculated using actual day differences
+* Rolling returns use the nearest available NAV after the target date
+* Max drawdown is calculated by tracking peak NAV and measuring drops
+
+If a fund does not have enough data for a window:
+
+* that window is skipped
+* no invalid values are returned
+
+---
+
+## Scaling Approach
+
+The system can scale in the following ways:
+
+* Add more workers → parallel processing
+* Use Redis to coordinate rate limiting across workers
+* Add DB read replicas for heavy read traffic
+* Partition NAV data if dataset grows large
+
+---
 
 ## Operational Practices
 
-- Structured logging via Pino.
-- Lifecycle logs for sync start/end, per-fund processing, retries, and dead-letter transitions.
-- Graceful shutdown for API + worker.
-- Strict schema constraints + indexes for reliability/performance.
-- Clear separation of concerns: API, pipeline, analytics, data access, queue.
+* Structured logging is used for debugging and monitoring
+* Key events are logged (sync start, completion, failures)
+* Graceful shutdown ensures no data loss
+* Database constraints and indexes improve reliability
+* Code is organized into clear layers (API, services, pipeline, analytics)
+
+---
+

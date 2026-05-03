@@ -1,0 +1,126 @@
+{
+  "info": {
+    "name": "Mutual Fund Analytics API",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:3000" },
+    { "key": "fundCode", "value": "120503" },
+    { "key": "sampleCategory", "value": "Equity: Mid Cap Direct Growth" }
+  ],
+  "item": [
+    {
+      "name": "Funds",
+      "item": [
+        {
+          "name": "List funds",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": "{{baseUrl}}/funds"
+          }
+        },
+        {
+          "name": "List funds (category + amc)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": "{{baseUrl}}/funds?category={{sampleCategory}}&amc=SBI"
+          }
+        },
+        {
+          "name": "Get fund by code",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": "{{baseUrl}}/funds/{{fundCode}}"
+          }
+        },
+        {
+          "name": "Rank funds",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": "{{baseUrl}}/funds/rank?category={{sampleCategory}}&window=3Y&sort_by=median_return&limit=5"
+          }
+        },
+
+        {
+          "name": "Fund analytics (1Y)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": "{{baseUrl}}/funds/{{fundCode}}/analytics?window=1Y"
+          }
+        },
+        {
+          "name": "Fund analytics (3Y)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": "{{baseUrl}}/funds/{{fundCode}}/analytics?window=3Y"
+          }
+        },
+        {
+          "name": "Fund analytics (5Y)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": "{{baseUrl}}/funds/{{fundCode}}/analytics?window=5Y"
+          }
+        },
+        {
+          "name": "Fund analytics (10Y)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": "{{baseUrl}}/funds/{{fundCode}}/analytics?window=10Y"
+          }
+        },
+
+        {
+          "name": "Fund analytics coverage",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": "{{baseUrl}}/funds/{{fundCode}}/analytics/coverage"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Sync",
+      "item": [
+        {
+          "name": "Trigger sync (202)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": "{{baseUrl}}/sync/trigger"
+          }
+        },
+        {
+          "name": "Sync status",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": "{{baseUrl}}/sync/status"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Metrics",
+      "item": [
+        {
+          "name": "MFAPI limiter metrics",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": "{{baseUrl}}/metrics"
+          }
+        }
+      ]
+    }
+  ]
+}
