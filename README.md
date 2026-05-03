@@ -2,7 +2,7 @@
 
 ## Overview
 
-A Node.js backend for fetching and analyzing Indian mutual fund NAV data from mfapi.in, with rate-limited data ingestion, background sync processing, and precomputed analytics for fast API responses.
+A Node.js backend for fetching and analyzing Indian mutual fund NAV data from mfapi.in. It uses rate-limited data ingestion, background sync processing, and precomputed analytics to provide fast API responses.
 
 ---
 
