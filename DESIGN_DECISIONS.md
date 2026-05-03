@@ -1,5 +1,16 @@
 # Design Decisions
 
+## Architecture Overview
+
+- Fastify serves public APIs and keeps request handlers thin.
+- Prisma handles relational persistence in PostgreSQL (`funds`, `nav_data`, `analytics`, `sync_state`).
+- BullMQ orchestrates background sync with worker processes.
+- Redis is used for:
+  - queue backend
+  - cache layer for hot read endpoints
+  - distributed limiter counters/state
+- Analytics are precomputed during sync and stored in DB for low-latency reads.
+
 ## Rate Limiting Strategy
 
 - Implemented with Bottleneck using **three chained limiters** (hour -> minute -> second).
@@ -35,6 +46,10 @@
 - BullMQ queue has two job types:
   - `full-sync`: enqueues all tracked funds.
   - `sync-fund`: fetches history for one fund, upserts NAV rows, recomputes analytics.
+- Queue/worker flow:
+  - API trigger enqueues `full-sync`
+  - worker expands into per-fund `sync-fund` jobs
+  - each fund job is idempotent and updates sync watermark/status
 - Backfill enqueue is **chunked and time-spaced**:
   - configurable batch size
   - delay between batches
@@ -52,6 +67,13 @@
 - BullMQ retry with exponential backoff handles transient failures.
 - Permanent failures are moved to a dead-letter queue for manual replay.
 - API-level retries with jittered exponential backoff handle `mfapi.in` failures and rate-limit responses.
+
+## Failure Handling
+
+- Network/transient provider errors: retried with exponential backoff + jitter.
+- Job failures: BullMQ retry policy with exponential backoff.
+- Terminal failures: moved to dead-letter queue (`mf-sync-dlq`) for investigation/replay.
+- Process restarts: persisted queue state + sync watermark allow safe resume.
 
 ## Analytics Tradeoffs
 

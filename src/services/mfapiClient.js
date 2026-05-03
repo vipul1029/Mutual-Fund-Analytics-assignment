@@ -14,6 +14,10 @@ async function fetchJson(path, attempt = 0) {
   const url = `${env.mfapiBaseUrl}${path}`;
   const schemeCode = path.split("/")[2] ?? "unknown";
   try {
+    const metrics = await mfapiLimiter.getMetrics();
+    logger.info(
+      `[${new Date().toISOString()}] API_PRECALL scheme=${schemeCode} sec=${metrics.per_second} min=${metrics.per_minute} hour=${metrics.per_hour}`
+    );
     const response = await mfapiLimiter.schedule(async () =>
       request(url, {
         method: "GET",
