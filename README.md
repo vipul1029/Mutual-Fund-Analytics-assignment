@@ -2,9 +2,7 @@
 
 ## Overview
 
-This project is built as part of a backend assignment to fetch and analyze mutual fund NAV data using the public API from mfapi.in.
-
-Instead of creating simple APIs, the goal here was to design a system that behaves more like a real backend service  where data is fetched in the background, processed safely with rate limits, and served efficiently through APIs.
+A Node.js backend for fetching and analyzing Indian mutual fund NAV data from mfapi.in, with rate-limited data ingestion, background sync processing, and precomputed analytics for fast API responses.
 
 ---
 
